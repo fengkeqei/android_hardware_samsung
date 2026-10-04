@@ -7,8 +7,13 @@
 #include "Fingerprint.h"
 
 #include <android-base/logging.h>
+#include <android-base/parseint.h>
+#include <android-base/strings.h>
+#include <fingerprint.sysprop.h>
 
 #include <dlfcn.h>
+
+using namespace ::android::fingerprint::samsung;
 
 namespace aidl {
 namespace android {
@@ -61,6 +66,22 @@ bool LegacyHAL::openHal(fingerprint_notify_t notify) {
         if ((err = ss_set_notify_callback(notify)) != 0) {
             LOG(ERROR) << "Can't register fingerprint module callback, error: " << err;
             return false;
+        }
+
+        // Round 71 experiment: issue stock-style vendor requests right after
+        // open. Whether the TEE-side AUTHHAT key decapsulation depends on
+        // these is under investigation (see WORKLOG Round 71).
+        if (ss_fingerprint_request) {
+            const auto reqs = FingerprintHalProperties::init_requests().value_or("");
+            if (!reqs.empty()) {
+                for (const auto& tok : ::android::base::Split(reqs, ",")) {
+                    int cmd = 0;
+                    if (!::android::base::ParseInt(::android::base::Trim(tok), &cmd)) continue;
+                    char out[256] = {};
+                    int result = ss_fingerprint_request(cmd, nullptr, 0, out, sizeof(out), 0);
+                    LOG(INFO) << "init request " << cmd << " -> " << result;
+                }
+            }
         }
 
         return true;

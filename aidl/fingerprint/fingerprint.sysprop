@@ -76,3 +76,14 @@ prop {
     access: Readonly
     api_name: "cancel_on_enroll_completion"
 }
+
+# comma separated ss_fingerprint_request cmd ids issued right after open
+# (stock-style init, e.g. 10000=GET_TA_VERSION, 30=GET_SECURITY_LEVEL,
+#  10001=INSTALL_TA). Vendor prop: runtime settable for experiments.
+prop {
+    prop_name: "vendor.fingerprint.init_requests"
+    type: String
+    scope: Internal
+    access: Readonly
+    api_name: "init_requests"
+}

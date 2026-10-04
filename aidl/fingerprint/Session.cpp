@@ -69,25 +69,39 @@ ndk::ScopedAStatus Session::enroll(const HardwareAuthToken& hat,
                                    std::shared_ptr<ICancellationSignal>* out) {
     LOG(INFO) << "enroll";
 
-    if (FingerprintHalProperties::force_calibrate().value_or(false)) {
-        mCaptureReady = false;
-        mHal.request(SEM_REQUEST_FORCE_CBGE, 1);
-    }
-
     hw_auth_token_t authToken;
     translate(hat, authToken);
 
-    int32_t error = mHal.ss_fingerprint_enroll(&authToken, mUserId, 0 /* timeoutSec */);
-    if (error) {
-        LOG(ERROR) << "ss_fingerprint_enroll failed: " << error;
-        mCb->onError(Error::UNABLE_TO_PROCESS, error);
-    }
-
-    if (FingerprintHalProperties::force_calibrate().value_or(false)) {
-        while (!mCaptureReady) {
-            std::this_thread::sleep_for(100ms);
+    // Round 71: ss_fingerprint_enroll blocks the calling thread until the
+    // capture completes (timeoutSec=0). Run the sequence on a worker thread:
+    // the binder thread must stay responsive (cancel, setIgnoreDisplayTouches),
+    // and a failed key negotiation (AuthHat_Decap_Key) must not wedge the
+    // framework scheduler (WORKLOG Round 71 deadlock).
+    std::thread([this, authToken]() {
+        if (FingerprintHalProperties::force_calibrate().value_or(false)) {
+            mCaptureReady = false;
+            mHal.request(SEM_REQUEST_FORCE_CBGE, 1);
         }
-    }
+
+        int32_t error = mHal.ss_fingerprint_enroll(&authToken, mUserId, 0 /* timeoutSec */);
+        if (error) {
+            LOG(ERROR) << "ss_fingerprint_enroll failed: " << error;
+            mCb->onError(Error::UNABLE_TO_PROCESS, error);
+            return;
+        }
+
+        if (FingerprintHalProperties::force_calibrate().value_or(false)) {
+            // bounded wait for the calibration capture (15s); capture-ready
+            // never arrives when the sensor interrupt enable failed.
+            for (int i = 0; i < 150 && !mCaptureReady; i++) {
+                std::this_thread::sleep_for(100ms);
+            }
+            if (!mCaptureReady) {
+                LOG(ERROR) << "calibration capture wait timed out";
+                mCb->onError(Error::UNABLE_TO_PROCESS, 0);
+            }
+        }
+    }).detach();
 
     *out = SharedRefBase::make<CancellationSignal>(this);
     return ndk::ScopedAStatus::ok();
