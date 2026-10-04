@@ -28,10 +28,8 @@ cc_defaults {
     static_libs: [
         "libhealth_aidl_impl",
     ],
-    cflags: select(soong_config_variable("samsungHealthVars", "enable_suspend"), {
-        "false": ["-DCHARGER_ENABLE_SUSPEND=false"],
-        default: ["-DCHARGER_ENABLE_SUSPEND=true"],
-    }),
+    // hardcoded: samsungHealthVars soong namespace is not declared anywhere in this tree
+    cflags: ["-DCHARGER_ENABLE_SUSPEND=false"],
 }
 
 cc_binary {
